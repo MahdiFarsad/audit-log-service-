@@ -1,6 +1,6 @@
-CREATE DATABASE MEAS_Log;
+CREATE DATABASE MEAS_AuditLog;
 GO
-USE MEAS_Log;
+USE MEAS_AuditLog;
 GO
 
 CREATE TABLE dbo.tblLogUserActivity

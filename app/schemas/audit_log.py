@@ -19,6 +19,4 @@ class LogEntry(BaseModel):
     errorMessage: Optional[str] = None
     durationMs: int
     apiKey: str
-
-    class Config:
-        populate_by_name = True
+    model_config = {"populate_by_name": True}

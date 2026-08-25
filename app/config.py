@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 class Settings(BaseSettings):
     mongo_uri: str
@@ -6,12 +7,11 @@ class Settings(BaseSettings):
 
     sql_server: str
     sql_database: str
-    sql_user: str
-    sql_password: str
+    sql_user: Optional[str] = None
+    sql_password: Optional[str] = None
 
     api_key: str
 
-    class Config:
-        env_file = ".env"
+    model_config = {"env_file": ".env"}
 
 settings = Settings()
