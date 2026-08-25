@@ -55,7 +55,7 @@ to directly on each request.
 | `SQL_DATABASE` | SQL Server database name | `MEAS_Log` |
 | `SQL_USER` | SQL auth username (leave blank if using Windows Auth) | `sa` |
 | `SQL_PASSWORD` | SQL auth password (leave blank if using Windows Auth) | — |
-| `API_KEY` | The apiKey MEAS II will send in each request body | (get real value from manager, do not use the dev placeholder) |
+| `API_KEY` | The apiKey MEAS II will send in each request body | (do not use the dev placeholder) |
 
 **Note on Windows Authentication:** if the target SQL Server uses Windows Auth instead
 of a SQL login, `app/database/sqlserver.py`'s connection string needs
