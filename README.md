@@ -1,143 +1,190 @@
 # Audit Log Service
 
-FastAPI service that ingests audit/activity log events from MEAS II via `POST /Logger`,
-writes them to MongoDB (fast write layer), and periodically syncs them to SQL Server
-(`dbo.tblLogUserActivity`) for reporting via an ETL script.
+> Ingests activity logs from MEAS II, writes them to MongoDB for speed, and syncs them to SQL Server for reporting.
 
-## Architecture
+![Status](https://img.shields.io/badge/status-live-brightgreen)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Stack](https://img.shields.io/badge/stack-FastAPI%20%7C%20MongoDB%20%7C%20SQL%20Server-informational)
 
-```
-MEAS II (.NET client) --POST /Logger--> FastAPI --> MongoDB (activity_logs)
-                                                          |
-                                                    etl/sync_to_sql.py
-                                                          |
-                                                          v
-                                                SQL Server (dbo.tblLogUserActivity)
-```
+---
 
-MongoDB is the primary write path (optimized for the <100ms response requirement).
-SQL Server is the reporting layer, kept in sync by a scheduled ETL job — not written
-to directly on each request.
+## Overview
 
-## Prerequisites
-
-- Python 3.10+
-- MongoDB (running and reachable)
-- SQL Server (running and reachable), with the `MEAS_Log` database created
-- ODBC Driver 17 for SQL Server (for the SQL Server connection) — download from
-  Microsoft if not already installed
-- Access to the target SQL Server instance (credentials or Windows Auth)
-
-## Setup
-
-1. Clone the repo and enter the project folder.
-2. Create and activate a virtual environment:
-   ```
-   python -m venv venv
-   venv\Scripts\activate        # Windows
-   source venv/bin/activate     # Mac/Linux
-   ```
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-4. Copy `.env.example` to `.env` and fill in real values (see table below).
-5. Create the SQL Server database and table — run `sql/create_database.sql` in SSMS
-   against your target server, if not already created.
-
-## Environment variables (`.env`)
-
-| Variable | Description | Example |
-|---|---|---|
-| `MONGO_URI` | MongoDB connection string | `mongodb://localhost:27017` |
-| `MONGO_DB` | MongoDB database name | `audit_log` |
-| `SQL_SERVER` | SQL Server address/instance | `192.168.1.31` or `localhost\SQLEXPRESS` |
-| `SQL_DATABASE` | SQL Server database name | `MEAS_Log` |
-| `SQL_USER` | SQL auth username (leave blank if using Windows Auth) | `sa` |
-| `SQL_PASSWORD` | SQL auth password (leave blank if using Windows Auth) | — |
-| `API_KEY` | The apiKey MEAS II will send in each request body | (do not use the dev placeholder) |
-
-**Note on Windows Authentication:** if the target SQL Server uses Windows Auth instead
-of a SQL login, `app/database/sqlserver.py`'s connection string needs
-`trusted_connection=yes` instead of a username/password — see the version used during
-local dev testing if needed.
-
-## Running the service
+This service receives a single type of event — a user activity log — from the MEAS II
+application, and makes it available for both real-time storage and long-term reporting.
 
 ```
-uvicorn app.main:app --host 0.0.0.0 --port 80
+┌─────────────┐      POST /Logger      ┌─────────────┐      queued write      ┌──────────────┐
+│   MEAS II   │ ──────────────────────▶ │   FastAPI    │ ─────────────────────▶ │   MongoDB     │
+│  (.NET app) │      < 100ms resp.      │   service    │                        │ (fast writes) │
+└─────────────┘                         └─────────────┘                        └──────┬───────┘
+                                                                                        │
+                                                                              every 2 min (ETL)
+                                                                                        │
+                                                                                        ▼
+                                                                                ┌───────────────┐
+                                                                                │  SQL Server    │
+                                                                                │ (reporting)    │
+                                                                                └───────────────┘
 ```
 
-Port 80 matches the spec's target URL (`http://<server>/Logger`, no port in the URL).
-Use `sudo`/admin privileges or a reverse proxy if binding to port 80 requires elevated
-permissions on your OS.
+**Why two databases?** MongoDB absorbs writes fast enough to hit the sub-100ms response
+requirement without blocking on a relational write. SQL Server is what the reporting
+tools and the rest of the team already know how to query — the ETL job keeps it in
+sync every 2 minutes without the client ever waiting on it.
 
-## Running the ETL sync
+---
 
-Manually:
-```
-python etl/sync_to_sql.py
-```
+## Tech stack
 
-Scheduled (recommended — every 1-2 minutes):
-- **Windows:** Task Scheduler → New Task → run `python etl/sync_to_sql.py` from the
-  project directory on a recurring trigger.
-- **Linux:** cron — `*/2 * * * * /path/to/venv/bin/python /path/to/etl/sync_to_sql.py`
+| Layer | Technology |
+|---|---|
+| API | FastAPI (Python) |
+| Fast write store | MongoDB |
+| Reporting store | SQL Server |
+| Background sync | Custom ETL script (SQLAlchemy + pyodbc) |
+| Production hosting | Windows Service (via NSSM) + Task Scheduler |
+| Tests | pytest, httpx |
 
-## Running tests
-
-```
-pytest tests/ -v
-```
-Covers: auth (valid/invalid key), payload validation (nulls, long strings, Persian
-text, missing fields), concurrency (100 simultaneous requests), and response latency
-(<100ms).
-
-## Acceptance checklist (run before flipping `Audit:Enabled` to `true` on MEAS II)
-
-- [ ] Sample payload → `204` → record appears in MongoDB
-- [ ] ETL run → same record appears in SQL Server, `synced` flag flips to `true`
-- [ ] Wrong `apiKey` → `401`, nothing written
-- [ ] Malformed body → `400`/`422`
-- [ ] Null optional fields don't error
-- [ ] Truncated/4001-char `methodParameters` doesn't error
-- [ ] Persian `displayName` stored correctly (UTF-8)
-- [ ] Response time consistently under 100ms
-- [ ] 100 concurrent requests — no dropped records
-- [ ] `apiKey` never appears in logs or responses
-
-## Deployment notes
-
-- Confirm target hosting environment (OS, port, process manager) with the team before
-  deploying — see open items below.
-- Keep `Audit:Enabled: false` on the MEAS II side until the full checklist above passes
-  in the production environment, then flip it to `true`.
-
-## Open items / needs from manager
-
-- [ ] Real production `API_KEY` (currently using a dev-only placeholder)
-- [ ] Confirmed production `SQL_SERVER` address and auth method
-- [ ] Confirmed production `MONGO_URI` (local to the service host, or separate DB server)
-- [ ] Deployment target OS and port
-- [ ] Firewall/network access confirmation for the service host to reach both databases
+---
 
 ## Project structure
 
 ```
 app/
-  main.py              FastAPI app entrypoint
-  config.py            Settings loaded from .env
-  api/logger.py         POST /Logger route
-  schemas/audit_log.py  Request validation model
-  models/audit_log.py   SQLAlchemy model for SQL Server table
-  database/mongodb.py   Mongo connection + indexes
-  database/sqlserver.py SQL Server connection
-  services/             Auth, queueing, and log-processing logic
-  workers/audit_worker.py  Background worker writing queued logs to Mongo
+├── main.py                    FastAPI entrypoint
+├── config.py                  Settings loaded from .env
+├── api/logger.py              POST /Logger route
+├── schemas/audit_log.py       Request validation (Pydantic)
+├── models/audit_log.py        SQL Server table model (SQLAlchemy)
+├── database/
+│   ├── mongodb.py             Mongo connection + indexes
+│   └── sqlserver.py           SQL Server connection
+├── services/
+│   ├── auth_service.py        API key verification
+│   ├── audit_service.py       Request → storable document
+│   └── queue_service.py       In-memory bounded queue (keeps responses fast)
+└── workers/audit_worker.py    Background worker draining the queue into MongoDB
 etl/
-  sync_to_sql.py       Syncs unsynced Mongo docs into SQL Server
+└── sync_to_sql.py             Syncs unsynced Mongo docs into SQL Server
 sql/
-  create_database.sql  DDL for MEAS_Log database and table
+└── create_database.sql        DDL for MEAS_AuditLog database + table
 tests/
-  test_auth.py, test_logger.py, test_concurrency.py
+├── test_auth.py
+├── test_logger.py
+└── test_concurrency.py
+docs/
+├── production-deployment-guide.md
+├── environment-checklist.md
+└── how-to-test.md
 ```
+
+---
+
+## Getting started (local development)
+
+```bash
+git clone <repo-url>
+cd audit-log-service
+
+python -m venv venv
+venv\Scripts\activate          # Windows
+source venv/bin/activate       # macOS/Linux
+
+pip install -r requirements.txt
+copy .env.example .env         # then fill in real values, see below
+```
+
+Create the database:
+```bash
+# Run sql/create_database.sql in SSMS against your SQL Server instance
+```
+
+Run it:
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+---
+
+## Environment variables
+
+| Variable | Description |
+|---|---|
+| `MONGO_URI` | MongoDB connection string |
+| `MONGO_DB` | MongoDB database name |
+| `SQL_SERVER` | SQL Server address/instance |
+| `SQL_DATABASE` | SQL Server database name (`MEAS_AuditLog`) |
+| `SQL_USER` / `SQL_PASSWORD` | SQL auth credentials (leave blank for Windows Auth) |
+| `API_KEY` | Shared secret MEAS II sends with each request |
+
+Full explanation of each value and where it comes from: see `docs/environment-checklist.md`.
+
+---
+
+## API contract
+
+**`POST /Logger`**
+
+Body includes `apiKey` (not a header), fire-and-forget from the client side, target
+response time < 100ms.
+
+| Response | Meaning |
+|---|---|
+| `204 No Content` | Accepted and queued |
+| `401 Unauthorized` | Invalid `apiKey` |
+| `422 Unprocessable Entity` | Missing/invalid required field |
+
+Full field list: see `app/schemas/audit_log.py`.
+
+---
+
+## Testing
+
+```bash
+pytest tests/ -v
+```
+
+Covers: auth, payload validation (nulls, long strings, Persian text), 100 concurrent
+requests, and response latency.
+
+Manual smoke test: see `docs/how-to-test.md`.
+
+---
+
+## Deploying to production
+
+Full walkthrough — server requirements, NSSM service setup, Task Scheduler for the
+ETL, firewall config: **`docs/production-deployment-guide.md`**
+
+Short version:
+1. Clone repo onto the target server, set up venv, install dependencies
+2. Fill in `.env` with production values
+3. Run `sql/create_database.sql` against the production SQL Server
+4. Wrap the app as a Windows Service with **NSSM** (auto-start, auto-restart)
+5. Schedule `python -m etl.sync_to_sql` via **Task Scheduler** (every 2 minutes)
+6. Open the firewall for the service's port
+7. Run the acceptance checklist below before going live
+
+---
+
+## Acceptance checklist
+
+- [ ] Valid payload → `204`, record in MongoDB
+- [ ] ETL sync → same record appears in SQL Server
+- [ ] Wrong `apiKey` → `401`
+- [ ] Malformed body → `422`
+- [ ] Null optional fields handled
+- [ ] Long `methodParameters` (4000+ chars) handled
+- [ ] Persian text stored correctly (UTF-8)
+- [ ] Response time consistently under 100ms
+- [ ] 100 concurrent requests — no failures, no dropped records
+- [ ] `apiKey` never appears in logs or responses
+
+---
+
+## Status
+
+Deployed and verified in production as of Aug 2026 — running as a Windows Service
+with an automated ETL sync. Pending: MEAS II pointed at the live endpoint and
+`Audit:Enabled` flipped to `true`.
