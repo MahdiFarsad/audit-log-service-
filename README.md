@@ -15,13 +15,13 @@ application, and makes it available for both real-time storage and long-term rep
 
 ```
 ┌─────────────┐      POST /Logger       ┌─────────────┐      queued write      ┌──────────────┐
-│   MEAS II   │ ──────────────────────▶│   FastAPI   │─────────────────────▶ │   MongoDB    │
+│   MEAS II   │ ──────────────────────▶│   FastAPI   │─────────────────────▶  │   MongoDB    │
 │  (.NET app) │      < 100ms resp.      │   service   │                        │ (fast writes)│
 └─────────────┘                         └─────────────┘                        └──────┬───────┘
-                                                                                        │
+                                                                                      │
                                                                               every 2 min (ETL)
-                                                                                        │
-                                                                                        ▼
+                                                                                      │
+                                                                                      ▼
                                                                                 ┌───────────────┐
                                                                                 │  SQL Server   │
                                                                                 │ (reporting)   │
