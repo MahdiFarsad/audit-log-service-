@@ -1,10 +1,14 @@
 import time
+import pytest
 from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
 
-client = TestClient(app)
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
 
 def make_payload(i: int) -> dict:
     return {
@@ -27,16 +31,13 @@ def make_payload(i: int) -> dict:
         "apiKey": settings.api_key,
     }
 
-def send_request(i: int):
-    return client.post("/Logger", json=make_payload(i))
-
-def test_100_concurrent_requests_all_succeed():
+def test_100_concurrent_requests_all_succeed(client):
     with ThreadPoolExecutor(max_workers=20) as executor:
-        results = list(executor.map(send_request, range(100)))
+        results = list(executor.map(lambda i: client.post("/Logger", json=make_payload(i)), range(100)))
     statuses = [r.status_code for r in results]
     assert all(s == 204 for s in statuses), f"Some requests failed: {statuses}"
 
-def test_response_time_under_100ms():
+def test_response_time_under_100ms(client):
     start = time.perf_counter()
     response = client.post("/Logger", json=make_payload(999))
     elapsed_ms = (time.perf_counter() - start) * 1000
