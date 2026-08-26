@@ -14,17 +14,17 @@ This service receives a single type of event — a user activity log — from th
 application, and makes it available for both real-time storage and long-term reporting.
 
 ```
-┌─────────────┐      POST /Logger      ┌─────────────┐      queued write      ┌──────────────┐
-│   MEAS II   │ ──────────────────────▶ │   FastAPI    │ ─────────────────────▶ │   MongoDB     │
-│  (.NET app) │      < 100ms resp.      │   service    │                        │ (fast writes) │
+┌─────────────┐      POST /Logger       ┌─────────────┐      queued write      ┌──────────────┐
+│   MEAS II   │ ──────────────────────▶│   FastAPI   │─────────────────────▶ │   MongoDB    │
+│  (.NET app) │      < 100ms resp.      │   service   │                        │ (fast writes)│
 └─────────────┘                         └─────────────┘                        └──────┬───────┘
                                                                                         │
                                                                               every 2 min (ETL)
                                                                                         │
                                                                                         ▼
                                                                                 ┌───────────────┐
-                                                                                │  SQL Server    │
-                                                                                │ (reporting)    │
+                                                                                │  SQL Server   │
+                                                                                │ (reporting)   │
                                                                                 └───────────────┘
 ```
 
