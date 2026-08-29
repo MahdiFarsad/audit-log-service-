@@ -84,7 +84,7 @@ docs/
 ## Getting started (local development)
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/MahdiFarsad/audit-log-service-.git
 cd audit-log-service
 
 python -m venv venv
